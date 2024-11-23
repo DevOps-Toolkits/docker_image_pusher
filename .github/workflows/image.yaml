@@ -1,0 +1,97 @@
+name: Docker Sync
+
+on:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: '0 0 * * *'  # 每天 0 点执行
+
+env:
+  ALIYUN_REGISTRY: "${{ secrets.ALIYUN_REGISTRY }}"
+  ALIYUN_NAME_SPACE: "${{ secrets.ALIYUN_NAME_SPACE }}"
+  ALIYUN_REGISTRY_USER: "${{ secrets.ALIYUN_REGISTRY_USER }}"
+  ALIYUN_REGISTRY_PASSWORD: "${{ secrets.ALIYUN_REGISTRY_PASSWORD }}"
+
+jobs:
+  sync-docker-images:
+    name: Sync Docker Images
+    runs-on: ubuntu-latest
+    steps:
+      - name: Before freeing up disk space
+        run: |
+          echo "Before freeing up disk space"
+          df -hT
+
+      # 增加可用磁盘空间
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 2048
+          swap-size-mb: 128
+          remove-dotnet: 'true'
+          remove-haskell: 'true'
+          # 如果需要更多空间，可开启以下选项
+          # remove-android: 'true'
+          # remove-codeql: 'true'
+          build-mount-path: '/var/lib/docker/'
+
+      - name: Restart Docker
+        run: sudo service docker restart
+
+      - name: Free up disk space complete
+        run: |
+          echo "Free up disk space complete"
+          df -hT
+
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Docker Setup Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Sync Images
+        run: |
+          docker login -u $ALIYUN_REGISTRY_USER -p $ALIYUN_REGISTRY_PASSWORD $ALIYUN_REGISTRY
+
+          while IFS= read -r line || [ -n "$line" ]; do
+              # 忽略空行和注释
+              [[ -z "$line" || "$line" =~ ^\s*# ]] && continue
+
+              # 提取 YAML 中的字段
+              source=$(echo "$line" | yq '.source')
+              target=$(echo "$line" | yq '.target // ""')
+              platform=$(echo "$line" | yq '.platform // ""')
+
+              # 默认目标镜像
+              if [[ -z "$target" ]]; then
+                  image_name_tag=$(echo "$source" | awk -F'/' '{print $NF}')
+                  target="$ALIYUN_REGISTRY/$ALIYUN_NAME_SPACE/$image_name_tag"
+              fi
+
+              echo "Processing image: $source"
+              echo "Target image: $target"
+              echo "Platform: $platform"
+
+              # Pull 镜像
+              if [[ -n "$platform" ]]; then
+                  docker pull --platform "$platform" "$source"
+              else
+                  docker pull "$source"
+              fi
+
+              # Tag and Push
+              docker tag "$source" "$target"
+              docker push "$target"
+
+              # Cleanup
+              echo "Cleaning up disk space..."
+              docker rmi "$source"
+              docker rmi "$target"
+              df -hT
+          done < images.yaml
+
+      - name: After all steps
+        run: |
+          echo "After completing all steps"
+          df -hT
