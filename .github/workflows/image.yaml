@@ -7,6 +7,13 @@ on:
   schedule:
     - cron: '0 0 * * *'  # 每天定时执行
 
+
+env:
+  ALIYUN_REGISTRY: "${{ secrets.ALIYUN_REGISTRY }}"
+  ALIYUN_NAME_SPACE: "${{ secrets.ALIYUN_NAME_SPACE }}"
+  ALIYUN_REGISTRY_USER: "${{ secrets.ALIYUN_REGISTRY_USER }}"
+  ALIYUN_REGISTRY_PASSWORD: "${{ secrets.ALIYUN_REGISTRY_PASSWORD }}"
+
 jobs:
   sync-images:
     runs-on: ubuntu-latest
@@ -91,11 +98,12 @@ jobs:
           echo "YAML 解析完成，结果保存到 images_parsed.txt"
           cat images_parsed.txt
 
+      - name: Login to Docker Registry
+        run: |
+          echo "$ALIYUN_REGISTRY_PASSWORD" | docker login -u "$ALIYUN_REGISTRY_USER" --password-stdin "$ALIYUN_REGISTRY"
+
       - name: Sync Docker images
         run: |
-          # 登录 Docker
-          echo "${{ secrets.ALIYUN_REGISTRY_PASSWORD }}" | docker login --username "${{ secrets.ALIYUN_REGISTRY_USER }}" --password-stdin "${{ secrets.ALIYUN_REGISTRY }}"
-
           # 逐行读取解析文件并处理镜像
           while IFS='|' read -r source target platform || [ -n "$source" ]; do
               echo "处理镜像：$source"
