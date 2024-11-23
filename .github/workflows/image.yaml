@@ -5,7 +5,7 @@ on:
     branches:
       - main
   schedule:
-    - cron: '0 0 * * *'  # 每天 0 点执行
+    - cron: '0 0 * * *'
 
 env:
   ALIYUN_REGISTRY: "${{ secrets.ALIYUN_REGISTRY }}"
@@ -18,31 +18,15 @@ jobs:
     name: Sync Docker Images
     runs-on: ubuntu-latest
     steps:
-      - name: Before freeing up disk space
-        run: |
-          echo "Before freeing up disk space"
-          df -hT
-
-      # 增加可用磁盘空间
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
-        with:
-          root-reserve-mb: 2048
-          swap-size-mb: 128
-          remove-dotnet: 'true'
-          remove-haskell: 'true'
-          # 如果需要更多空间，可开启以下选项
-          # remove-android: 'true'
-          # remove-codeql: 'true'
-          build-mount-path: '/var/lib/docker/'
 
       - name: Restart Docker
         run: sudo service docker restart
 
-      - name: Free up disk space complete
+      - name: Docker Login
         run: |
-          echo "Free up disk space complete"
-          df -hT
+          echo "$ALIYUN_REGISTRY_PASSWORD" | docker login -u "$ALIYUN_REGISTRY_USER" --password-stdin "$ALIYUN_REGISTRY"
 
       - name: Check out code
         uses: actions/checkout@v4
@@ -52,18 +36,18 @@ jobs:
 
       - name: Sync Images
         run: |
-          docker login -u $ALIYUN_REGISTRY_USER -p $ALIYUN_REGISTRY_PASSWORD $ALIYUN_REGISTRY
-
           while IFS= read -r line || [ -n "$line" ]; do
-              # 忽略空行和注释
               [[ -z "$line" || "$line" =~ ^\s*# ]] && continue
 
-              # 提取 YAML 中的字段
-              source=$(echo "$line" | yq '.source')
-              target=$(echo "$line" | yq '.target // ""')
-              platform=$(echo "$line" | yq '.platform // ""')
+              source=$(echo "$line" | yq -r '.source // empty')
+              target=$(echo "$line" | yq -r '.target // empty')
+              platform=$(echo "$line" | yq -r '.platform // empty')
 
-              # 默认目标镜像
+              if [[ -z "$source" ]]; then
+                  echo "Error: 'source' is missing in the YAML entry: $line"
+                  continue
+              fi
+
               if [[ -z "$target" ]]; then
                   image_name_tag=$(echo "$source" | awk -F'/' '{print $NF}')
                   target="$ALIYUN_REGISTRY/$ALIYUN_NAME_SPACE/$image_name_tag"
@@ -73,25 +57,16 @@ jobs:
               echo "Target image: $target"
               echo "Platform: $platform"
 
-              # Pull 镜像
               if [[ -n "$platform" ]]; then
                   docker pull --platform "$platform" "$source"
               else
                   docker pull "$source"
               fi
 
-              # Tag and Push
               docker tag "$source" "$target"
               docker push "$target"
-
-              # Cleanup
-              echo "Cleaning up disk space..."
               docker rmi "$source"
               docker rmi "$target"
               df -hT
           done < images.yaml
 
-      - name: After all steps
-        run: |
-          echo "After completing all steps"
-          df -hT
