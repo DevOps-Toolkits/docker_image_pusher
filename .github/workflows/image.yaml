@@ -61,44 +61,42 @@ jobs:
           # 验证 yq 安装
           yq --version
 
-      - name: Parse YAML to temp file
+      - name: Parse YAML and prepare image list
         run: |
-          # 解析 images.yaml 文件到临时文件
-          output_file="images_parsed.txt"
-          > "$output_file"
+          # 解析 images.yaml 文件
+          > images_parsed.txt
 
-          while IFS= read -r line || [ -n "$line" ]; do
-              # 跳过空行或注释
-              [[ -z "$line" || "$line" =~ ^\s*# ]] && continue
+          # 遍历 YAML 文件，生成临时文件
+          yq -r '.[]' images.yaml | while IFS= read -r item; do
+              source=$(echo "$item" | yq -r '.source // ""')
+              target=$(echo "$item" | yq -r '.target // ""')
+              platform=$(echo "$item" | yq -r '.platform // ""')
 
-              # 解析 YAML 字段
-              source=$(echo "$line" | yq '.source // ""')
-              target=$(echo "$line" | yq '.target // ""')
-              platform=$(echo "$line" | yq '.platform // ""')
-
-              # 检查 source 是否存在
+              # 检查 source 是否为空
               if [[ -z "$source" ]]; then
-                  echo "Error: 'source' is missing in the YAML entry: $line" >&2
+                  echo "Error: 'source' is missing in entry: $item" >&2
                   continue
               fi
 
-              # 如果 target 为空，默认生成
+              # 如果 target 未指定，使用默认规则
               if [[ -z "$target" ]]; then
                   image_name_tag=$(echo "$source" | awk -F'/' '{print $NF}')
                   target="$ALIYUN_REGISTRY/$ALIYUN_NAME_SPACE/$image_name_tag"
               fi
 
-              # 写入临时文件
-              echo "$source|$target|$platform" >> "$output_file"
-          done < images.yaml
+              # 写入解析结果到临时文件
+              echo "$source|$target|$platform" >> images_parsed.txt
+          done
 
-          echo "YAML 解析完成，输出到 $output_file"
+          echo "YAML 解析完成，结果保存到 images_parsed.txt"
+          cat images_parsed.txt
 
       - name: Sync Docker images
         run: |
-          input_file="images_parsed.txt"
-          
-          # 逐行读取文件内容并同步镜像
+          # 登录 Docker
+          echo "$ALIYUN_REGISTRY_PASSWORD" | docker login -u "$ALIYUN_REGISTRY_USER" --password-stdin "$ALIYUN_REGISTRY"
+
+          # 逐行读取解析文件并处理镜像
           while IFS='|' read -r source target platform || [ -n "$source" ]; do
               echo "处理镜像：$source"
               echo "目标镜像：$target"
@@ -116,9 +114,8 @@ jobs:
               docker push "$target"
 
               # 清理本地镜像
-              docker rmi "$source"
-              docker rmi "$target"
-              df -hT
-          done < "$input_file"
+              docker rmi "$source" || true
+              docker rmi "$target" || true
+          done < images_parsed.txt
 
           echo "镜像同步完成！"
