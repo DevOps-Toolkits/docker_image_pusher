@@ -1,0 +1,14 @@
+#- source: kasmweb/nginx:1.25.3
+#  platform: linux/arm64
+#- source: postgres:15
+#  target: a-postgres:15
+#  platform: linux/amd64
+- source: allanpk716/chinesesubfinder
+- source: linuxserver/jackett
+- source: diluka/nas-tools:2.9.1
+- source: linuxserver/qbittorrent
+- source: neilpang/acme.sh
+- source: nyanmisaka/jellyfin
+- source: hslr/sun-panel
+- source: v2raya/v2raya
+  target: proxy
