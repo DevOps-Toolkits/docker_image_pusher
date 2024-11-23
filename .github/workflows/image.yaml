@@ -1,81 +1,111 @@
-name: Docker Sync
+name: Sync Docker Images
 
 on:
   push:
     branches:
-      - main
+      - main  # 监听 main 分支的推送
   schedule:
-    - cron: '0 0 * * *'
-
-env:
-  ALIYUN_REGISTRY: "${{ secrets.ALIYUN_REGISTRY }}"
-  ALIYUN_NAME_SPACE: "${{ secrets.ALIYUN_NAME_SPACE }}"
-  ALIYUN_REGISTRY_USER: "${{ secrets.ALIYUN_REGISTRY_USER }}"
-  ALIYUN_REGISTRY_PASSWORD: "${{ secrets.ALIYUN_REGISTRY_PASSWORD }}"
+    - cron: '0 0 * * *'  # 每天定时执行
 
 jobs:
-  sync-docker-images:
-    name: Sync Docker Images
+  sync-images:
     runs-on: ubuntu-latest
     steps:
+      - name: Before freeing up disk space
+        run: |
+          echo "Before freeing up disk space"
+          df -hT
+
+      # 增加可用磁盘空间
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 2048
+          swap-size-mb: 128
+          remove-dotnet: 'true'
+          remove-haskell: 'true'
+          # 如果需要更多空间，可开启以下选项
+          # remove-android: 'true'
+          # remove-codeql: 'true'
+          build-mount-path: '/var/lib/docker/'
 
       - name: Restart Docker
         run: sudo service docker restart
 
-      - name: Docker Login
+      - name: Free up disk space complete
         run: |
-          echo "$ALIYUN_REGISTRY_PASSWORD" | docker login -u "$ALIYUN_REGISTRY_USER" --password-stdin "$ALIYUN_REGISTRY"
+          echo "Free up disk space complete"
+          df -hT
+          
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-      - name: Check out code
-        uses: actions/checkout@v4
+      - name: Set up Docker
+        uses: docker/setup-buildx-action@v2
 
-      - name: Docker Setup Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Sync Images
+      - name: Set up YQ for YAML parsing
         run: |
+          sudo apt-get install -y jq
+          sudo apt-get install -y yq
+
+      - name: Parse YAML to temp file
+        run: |
+          # 解析 images.yaml 文件到临时文件
+          output_file="images_parsed.txt"
+          > "$output_file"
+
           while IFS= read -r line || [ -n "$line" ]; do
               # 跳过空行或注释
               [[ -z "$line" || "$line" =~ ^\s*# ]] && continue
-          
-              # 使用 yq 解析 YAML
+
+              # 解析 YAML 字段
               source=$(echo "$line" | yq '.source // ""')
               target=$(echo "$line" | yq '.target // ""')
               platform=$(echo "$line" | yq '.platform // ""')
-          
-              # 检查 source 是否为空
+
+              # 检查 source 是否存在
               if [[ -z "$source" ]]; then
-                  echo "Error: 'source' is missing in the YAML entry: $line"
+                  echo "Error: 'source' is missing in the YAML entry: $line" >&2
                   continue
               fi
-          
+
               # 如果 target 为空，默认生成
               if [[ -z "$target" ]]; then
                   image_name_tag=$(echo "$source" | awk -F'/' '{print $NF}')
                   target="$ALIYUN_REGISTRY/$ALIYUN_NAME_SPACE/$image_name_tag"
               fi
+
+              # 写入临时文件
+              echo "$source|$target|$platform" >> "$output_file"
+          done < images.yaml
+
+          echo "YAML 解析完成，输出到 $output_file"
+
+      - name: Sync Docker images
+        run: |
+          input_file="images_parsed.txt"
           
-              echo "Processing image: $source"
-              echo "Target image: $target"
-              echo "Platform: $platform"
-          
-              # Pull 镜像
+          # 逐行读取文件内容并同步镜像
+          while IFS='|' read -r source target platform || [ -n "$source" ]; do
+              echo "处理镜像：$source"
+              echo "目标镜像：$target"
+              echo "平台：$platform"
+
+              # 拉取镜像
               if [[ -n "$platform" ]]; then
                   docker pull --platform "$platform" "$source"
               else
                   docker pull "$source"
               fi
-          
-              # Tag 和 Push 镜像
+
+              # 标记并推送镜像
               docker tag "$source" "$target"
               docker push "$target"
-          
-              # 清理
+
+              # 清理本地镜像
               docker rmi "$source"
               docker rmi "$target"
               df -hT
-          done < images.yaml
+          done < "$input_file"
 
-
+          echo "镜像同步完成！"
