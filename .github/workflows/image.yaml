@@ -43,15 +43,21 @@ jobs:
       - name: Set up Docker
         uses: docker/setup-buildx-action@v2
 
-      - name: Set up YQ for YAML parsing
+      - name: Set up jq and dynamic YQ download
         run: |
           # 安装 jq
           sudo apt-get install -y jq
 
-          # 安装 yq
-          sudo curl -L https://github.com/mikefarah/yq/releases/download/v4.33.0/yq_linux_amd64 -o /usr/local/bin/yq
+          # 获取最新版本的 yq
+          latest_version=$(curl -s https://api.github.com/repos/mikefarah/yq/releases/latest | jq -r .tag_name)
+
+          # 构建下载链接
+          download_url="https://github.com/mikefarah/yq/releases/download/${latest_version}/yq_linux_amd64"
+
+          # 下载并安装 yq
+          sudo curl -sL $download_url -o /usr/local/bin/yq
           sudo chmod +x /usr/local/bin/yq
-          
+
           # 验证 yq 安装
           yq --version
 
