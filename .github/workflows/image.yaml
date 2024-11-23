@@ -45,8 +45,15 @@ jobs:
 
       - name: Set up YQ for YAML parsing
         run: |
+          # 安装 jq
           sudo apt-get install -y jq
-          sudo apt-get install -y yq
+
+          # 安装 yq
+          sudo curl -L https://github.com/mikefarah/yq/releases/download/v4.33.0/yq_linux_amd64 -o /usr/local/bin/yq
+          sudo chmod +x /usr/local/bin/yq
+          
+          # 验证 yq 安装
+          yq --version
 
       - name: Parse YAML to temp file
         run: |
