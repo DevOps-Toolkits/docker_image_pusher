@@ -16,3 +16,4 @@
 - source: linkease/webvirtcloud:latest
 - source: wouisb/subconv:latest
 - source: ghcr.io/open-webui/open-webui:main
+- source: nginx:stable-alpine
